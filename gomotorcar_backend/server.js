@@ -1,0 +1,34 @@
+const express      = require("express");
+const cors         = require("cors");
+const helmet       = require("helmet");
+const morgan       = require("morgan");
+const cookieParser = require("cookie-parser");
+
+const { errorHandler, notFoundHandler } = require("./src/middlewares/errorHandler");
+
+const app = express();
+
+app.use(helmet());
+app.use(cors({ origin: "*", credentials: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
+
+if (process.env.NODE_ENV === "development") {
+  app.use(morgan("dev"));
+}
+
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "GoMotorCar API is running 🚗",
+    version: "1.0.0",
+  });
+});
+
+app.use("/api/auth", require("./src/routes/auth.routes"));
+
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+module.exports = app;
