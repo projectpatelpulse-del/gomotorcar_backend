@@ -120,10 +120,11 @@ const userSchema = new mongoose.Schema(
 );
 
 // ─── Indexes ─────────────────────────────────────────────
-userSchema.index({ mobileNo: 1 });
+// userSchema.index({ mobileNo: 1 });
+
 userSchema.index({ role: 1 });
 userSchema.index({ status: 1 });
-userSchema.index({ partnerId: 1 });
+// userSchema.index({ partnerId: 1 });
 
 const User = mongoose.model("User", userSchema);
 
