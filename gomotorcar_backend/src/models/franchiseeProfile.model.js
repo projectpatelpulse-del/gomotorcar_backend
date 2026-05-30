@@ -196,7 +196,6 @@ const franchiseeProfileSchema = new mongoose.Schema(
 );
 
 // ─── Indexes ────────────────────────────────────────────
-franchiseeProfileSchema.index({ userId: 1 });
 franchiseeProfileSchema.index({ location: "2dsphere" });
 franchiseeProfileSchema.index({ servicePinCodes: 1 });
 franchiseeProfileSchema.index({ franchiseType: 1 });

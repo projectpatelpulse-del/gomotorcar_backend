@@ -1,4 +1,5 @@
-const User        = require("../models/user.model");
+const User= require("../models/user.model");
+const bcrypt = require("bcryptjs");
 const asyncHandler = require("../utils/asyncHandler");
 const {
   successResponse,
@@ -172,13 +173,22 @@ const rejectUser = asyncHandler(async (req, res) => {
 // @access  Private (IT Admin only)
 // ─────────────────────────────────────────────────────────
 const createInternalUser = asyncHandler(async (req, res) => {
-  const { mobileNo, role, name, email } = req.body;
+  const { mobileNo, role, name, email, password } = req.body;
 
   // Only admin-created roles allowed here
   if (!ADMIN_CREATED_ROLES.includes(role)) {
     return errorResponse(
       res,
-      "This role must self-register. Use /api/auth/register instead.",
+      "This role must self-register.",
+      400
+    );
+  }
+
+  // Password is required for internal users
+  if (!password || password.length < 6) {
+    return errorResponse(
+      res,
+      "Password is required and must be at least 6 characters",
       400
     );
   }
@@ -189,7 +199,10 @@ const createInternalUser = asyncHandler(async (req, res) => {
     return errorResponse(res, "Mobile number already registered", 409);
   }
 
-  // Generate Partner ID immediately (no approval needed for internal)
+  // Hash password
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  // Generate Partner ID immediately
   const partnerId = await generatePartnerId(role);
 
   const user = await User.create({
@@ -198,6 +211,7 @@ const createInternalUser = asyncHandler(async (req, res) => {
     name,
     email,
     partnerId,
+    password:    hashedPassword,
     status:      USER_STATUS.ACTIVE,
     createdBy:   req.user._id,
     approvedBy:  req.user._id,
@@ -215,6 +229,7 @@ const createInternalUser = asyncHandler(async (req, res) => {
         role:      user.role,
         partnerId: user.partnerId,
         status:    user.status,
+        // Never return password in response
       },
     }
   );

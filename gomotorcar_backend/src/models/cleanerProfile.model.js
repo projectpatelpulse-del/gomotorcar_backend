@@ -121,7 +121,6 @@ const cleanerProfileSchema = new mongoose.Schema(
 );
 
 // ─── Indexes ──────────────────────────────────────────────
-cleanerProfileSchema.index({ userId: 1 });
 
 const CleanerProfile = mongoose.model(
   "CleanerProfile",

@@ -241,7 +241,7 @@ const register = asyncHandler(async (req, res) => {
 // @access  Public
 // ─────────────────────────────────────────────────────────
 const login = asyncHandler(async (req, res) => {
-  const { mobileNo } = req.body;
+  const { mobileNo, fcmToken } = req.body; // ← add fcmToken
 
   // Find user
   const user = await User.findOne({ mobileNo, isDeleted: false });
@@ -279,16 +279,22 @@ const login = asyncHandler(async (req, res) => {
   const refreshToken = generateRefreshToken(user);
 
   // Single session enforcement for Car Cleaners
-  // New login invalidates previous session
   const sessionToken = crypto.randomBytes(32).toString("hex");
 
-  // Update last login and session token
-  await User.findByIdAndUpdate(user._id, {
-    lastLoginAt:  new Date(),
+  // Update last login, session token AND fcm token
+  const updateFields = {
+    lastLoginAt: new Date(),
     sessionToken: SINGLE_SESSION_ROLES.includes(user.role)
       ? sessionToken
       : user.sessionToken,
-  });
+  };
+
+  // Save FCM token if provided
+  if (fcmToken) {
+    updateFields.fcmToken = fcmToken;
+  }
+
+  await User.findByIdAndUpdate(user._id, updateFields);
 
   return successResponse(res, "Login successful", {
     user: {
@@ -305,6 +311,9 @@ const login = asyncHandler(async (req, res) => {
     },
   });
 });
+
+
+
 
 // ─────────────────────────────────────────────────────────
 // @route   POST /api/auth/token/refresh
@@ -375,6 +384,172 @@ const getMe = asyncHandler(async (req, res) => {
   return successResponse(res, "User fetched successfully", { user });
 });
 
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/auth/registration/:regId
+// @desc    Poll registration/approval status
+// @access  Public
+// ─────────────────────────────────────────────────────────
+const getRegistrationStatus = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.params.regId).select(
+    "name mobileNo role status partnerId createdAt approvedAt"
+  );
+
+  if (!user) {
+    return errorResponse(res, "Registration not found", 404);
+  }
+
+  // Map status to what app needs to show
+  const statusMap = {
+    pending_approval: "PENDING",
+    approved:         "PENDING",
+    active:           "ACTIVE",
+    rejected:         "REJECTED",
+    inactive:         "INACTIVE",
+  };
+
+  // Check if payment required
+  // NCSP needs annual fee payment after approval
+  const PAYMENT_REQUIRED_ROLES = ["NC"];
+  let displayStatus = statusMap[user.status] || "PENDING";
+
+  if (
+    user.status === "active" &&
+    PAYMENT_REQUIRED_ROLES.includes(user.role)
+  ) {
+    // Will be updated in Phase 4 when payment module is ready
+    displayStatus = "ACTIVE";
+  }
+
+  return successResponse(
+    res,
+    "Registration status fetched",
+    {
+      regId:     user._id,
+      name:      user.name,
+      role:      user.role,
+      status:    displayStatus,
+      partnerId: user.partnerId || null,
+      message:   getStatusMessage(displayStatus, user.role),
+      createdAt: user.createdAt,
+      approvedAt:user.approvedAt || null,
+    }
+  );
+});
+
+// Helper — Status message for app splash screen
+const getStatusMessage = (status, role) => {
+  const messages = {
+    PENDING:          "Your registration is under review. We will notify you once approved.",
+    ACTIVE:           "Your account is active. You can now login.",
+    REJECTED:         "Your registration was rejected. Please contact support.",
+    PAYMENT_REQUIRED: "Please complete payment to activate your listing.",
+    INACTIVE:         "Your account is inactive. Please contact support.",
+  };
+  return messages[status] || "Status unknown";
+};
+
+// ─────────────────────────────────────────────────────────
+// @route   POST /api/auth/internal/login
+// @desc    Login for internal users (Supervisor, Ops, Admin)
+//          These users login with credentials not OTP
+// @access  Public
+// ─────────────────────────────────────────────────────────
+const internalLogin = asyncHandler(async (req, res) => {
+  const { mobileNo, password } = req.body;
+
+  if (!mobileNo || !password) {
+    return errorResponse(
+      res,
+      "Mobile number and password are required",
+      400
+    );
+  }
+
+  // Find user and include password for internal login
+  const user = await User.findOne({
+    mobileNo,
+    isDeleted: false,
+  }).select("+password");
+
+  if (!user) {
+    return errorResponse(res, "Invalid credentials", 401);
+  }
+
+  // Only internal roles allowed here
+  const { INTERNAL_ROLES } = require("../config/constants");
+  if (!INTERNAL_ROLES.includes(user.role)) {
+    return errorResponse(
+      res,
+      "This login is only for internal team members",
+      403
+    );
+  }
+
+  // Check status
+  if (user.status !== USER_STATUS.ACTIVE) {
+    return errorResponse(
+      res,
+      `Account is ${user.status}. Contact admin.`,
+      403
+    );
+  }
+
+  // Verify password
+  if (!user.password) {
+    return errorResponse(res, "Invalid credentials", 401);
+  }
+
+  const isMatch = await bcrypt.compare(password, user.password);
+  if (!isMatch) {
+    return errorResponse(res, "Invalid credentials", 401);
+  }
+
+  // Generate tokens
+  const accessToken  = generateAccessToken(user);
+  const refreshToken = generateRefreshToken(user);
+
+  // Update last login
+  await User.findByIdAndUpdate(user._id, {
+    lastLoginAt: new Date(),
+  });
+
+  return successResponse(res, "Login successful", {
+    user: {
+      id:        user._id,
+      name:      user.name,
+      mobileNo:  user.mobileNo,
+      role:      user.role,
+      status:    user.status,
+      partnerId: user.partnerId,
+    },
+    tokens: {
+      accessToken,
+      refreshToken,
+    },
+  });
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   POST /api/auth/fcm-token
+// @desc    Register or refresh FCM device token
+// @access  Private
+// ─────────────────────────────────────────────────────────
+const updateFcmToken = asyncHandler(async (req, res) => {
+  const { fcmToken } = req.body;
+
+  if (!fcmToken) {
+    return errorResponse(res, "FCM token is required", 400);
+  }
+
+  await User.findByIdAndUpdate(req.user._id, {
+    fcmToken,
+  });
+
+  return successResponse(res, "FCM token updated successfully");
+});
+
+
 module.exports = {
   sendOTP,
   verifyOTP,
@@ -383,4 +558,7 @@ module.exports = {
   refreshToken,
   logout,
   getMe,
+  getRegistrationStatus,
+  internalLogin,
+  updateFcmToken,
 };

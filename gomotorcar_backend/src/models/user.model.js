@@ -87,6 +87,25 @@ const userSchema = new mongoose.Schema(
       type: Date,
     },
 
+    // ─── Password (Internal users only) ─────────────────────
+// Supervisor, Operations Team, IT Admin login with password
+// External users login with OTP only
+password: {
+  type:   String,
+  select: false,
+  // select:false means password never returned in queries
+  // Must explicitly use .select("+password") to get it
+},
+
+// ─── FCM Token (Push Notifications) ─────────────────────
+// Firebase Cloud Messaging token for push notifications
+// Updated on every login
+fcmToken: {
+  type: String,
+  // Stores device token for sending push notifications
+},
+
+
     // ─── Admin tracking ──────────────────────────────────
     // Who created this user (for admin-created roles)
     createdBy: {

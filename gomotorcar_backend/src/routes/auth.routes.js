@@ -10,6 +10,9 @@ const {
   refreshToken,
   logout,
   getMe,
+  getRegistrationStatus,
+  internalLogin,
+  updateFcmToken,
 } = require("../controllers/auth.controller");
 
 const { authenticate } = require("../middlewares/auth.middleware");
@@ -91,5 +94,35 @@ router.post("/logout", authenticate, logout);
 // @route  GET  /api/auth/me           (protected)
 // ─────────────────────────────────────────────────────────
 router.get("/me", authenticate, getMe);
+
+// ─────────────────────────────────────────────────────────
+// @route  GET  /api/auth/registration/:regId
+// ─────────────────────────────────────────────────────────
+router.get("/registration/:regId", getRegistrationStatus);
+
+// ─────────────────────────────────────────────────────────
+// @route  POST /api/auth/internal/login
+// ─────────────────────────────────────────────────────────
+router.post(
+  "/internal/login",
+  [
+    body("mobileNo")
+      .notEmpty().withMessage("Mobile number is required"),
+    body("password")
+      .notEmpty().withMessage("Password is required"),
+  ],
+  internalLogin
+);
+
+// Add route
+// ─────────────────────────────────────────────────────────
+// @route  POST /api/auth/fcm-token    (protected)
+// ─────────────────────────────────────────────────────────
+router.post(
+  "/fcm-token",
+  authenticate,
+  body("fcmToken").notEmpty().withMessage("FCM token is required"),
+  updateFcmToken
+);
 
 module.exports = router;

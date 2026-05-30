@@ -163,7 +163,6 @@ const ncspProfileSchema = new mongoose.Schema(
 );
 
 // ─── Indexes ────────────────────────────────────────────
-ncspProfileSchema.index({ userId: 1 });
 ncspProfileSchema.index({ location: "2dsphere" });
 ncspProfileSchema.index({ appStatus: 1 });
 
