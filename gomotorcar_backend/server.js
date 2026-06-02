@@ -38,6 +38,8 @@ app.use("/api/ncsp/profile",       require("./src/routes/ncspProfile.routes"));
 app.use("/api/franchisee/profile", require("./src/routes/franchiseeProfile.routes")); 
 app.use("/api/packages",           require("./src/routes/package.routes"));     
 app.use("/api/subscriptions",      require("./src/routes/subscription.routes"));   
+app.use("/api/categories",         require("./src/routes/category.routes"));   
+app.use("/api/search",             require("./src/routes/search.routes"));     
 
 app.use(notFoundHandler);
 app.use(errorHandler);
