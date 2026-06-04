@@ -40,6 +40,7 @@ app.use("/api/packages",           require("./src/routes/package.routes"));
 app.use("/api/subscriptions",      require("./src/routes/subscription.routes"));   
 app.use("/api/categories",         require("./src/routes/category.routes"));   
 app.use("/api/search",             require("./src/routes/search.routes"));     
+app.use("/api/booking",            require("./src/routes/booking.routes"));
 
 app.use(notFoundHandler);
 app.use(errorHandler);
