@@ -41,6 +41,8 @@ app.use("/api/subscriptions",      require("./src/routes/subscription.routes"));
 app.use("/api/categories",         require("./src/routes/category.routes"));   
 app.use("/api/search",             require("./src/routes/search.routes"));     
 app.use("/api/booking",            require("./src/routes/booking.routes"));
+app.use("/api/fasttag",            require("./src/routes/fasttag.routes"));   // NEW
+app.use("/api/payment",            require("./src/routes/payment.routes"));
 
 app.use(notFoundHandler);
 app.use(errorHandler);
