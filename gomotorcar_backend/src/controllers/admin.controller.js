@@ -16,11 +16,26 @@ const {
 // HELPER — Generate Partner ID e.g. CL-00042
 // ─────────────────────────────────────────────────────────
 const generatePartnerId = async (role) => {
-  const count = await User.countDocuments({ role });
-  const padded = String(count + 1).padStart(5, "0");
-  return `${role}-${padded}`;
-};
+  // Keep trying until unique ID found
+  let partnerId;
+  let isUnique = false;
 
+  while (!isUnique) {
+    const count  = await User.countDocuments({ role });
+    const random = Math.floor(Math.random() * 1000);
+    const padded = String(count + 1 + random)
+      .padStart(5, "0");
+    partnerId = `${role}-${padded}`;
+
+    // Check if already exists
+    const existing = await User.findOne({ partnerId });
+    if (!existing) {
+      isUnique = true;
+    }
+  }
+
+  return partnerId;
+};
 // ─────────────────────────────────────────────────────────
 // @route   GET /api/admin/users
 // @desc    Get all users with filters
