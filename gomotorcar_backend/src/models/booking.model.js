@@ -211,14 +211,12 @@ bookingSchema.index({ status: 1 });
 bookingSchema.index({ scheduledDate: 1 });
 
 // ─── Auto generate booking number ────────────────────────
-bookingSchema.pre("save", async function (next) {
+bookingSchema.pre("save", async function () {
   if (!this.bookingNo) {
-    const count  = await mongoose.model("Booking")
-      .countDocuments();
+    const count = await mongoose.model("Booking").countDocuments();
     const padded = String(count + 1).padStart(5, "0");
     this.bookingNo = `GMC-BK-${padded}`;
   }
-  // next();
 });
 
 const Booking = mongoose.model("Booking", bookingSchema);
