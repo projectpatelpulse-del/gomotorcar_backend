@@ -60,7 +60,6 @@ const qrStockSchema = new mongoose.Schema(
 // ─── Indexes ──────────────────────────────────────────────
 qrStockSchema.index({ supervisorId: 1 });
 qrStockSchema.index({ status: 1 });
-qrStockSchema.index({ qrCode: 1 });
 
 const QRStock = mongoose.model("QRStock", qrStockSchema);
 
