@@ -31,6 +31,7 @@ app.use("/api/auth",     require("./src/routes/auth.routes"));
 app.use("/api/profile",  require("./src/routes/profile.routes"));
 app.use("/api/vehicles", require("./src/routes/vehicle.routes"));
 app.use("/api/addresses",require("./src/routes/address.routes"));
+app.use("/api/admin/panel", require("./src/routes/adminPanel.routes"));
 app.use("/api/admin",    require("./src/routes/admin.routes"));
 
 app.use("/api/cleaner/profile",    require("./src/routes/cleanerProfile.routes"));    

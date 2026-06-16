@@ -6,7 +6,7 @@ const qrStockSchema = new mongoose.Schema(
     supervisorId: {
       type:     mongoose.Schema.Types.ObjectId,
       ref:      "User",
-      required: true,
+      // required: true,
     },
 
     // ─── QR Code Details ─────────────────────────────────
