@@ -37,25 +37,39 @@ const franchiseeProfileSchema = new mongoose.Schema(
     // ─── Franchise Type ────────────────────────────────
     // FR = CSP (geo location based search)
     // FS = Steam Car Wash (pin code based search)
+    // franchiseType: {
+    //   type:     String,
+    //   enum:     ["csp", "steam_wash"],
+    //   required: [true, "Franchise type is required"],
+    // },
     franchiseType: {
-      type:     String,
-      enum:     ["csp", "steam_wash"],
-      required: [true, "Franchise type is required"],
-    },
+  type:    String,
+  enum:    ["csp", "steam_wash", ""],
+  default: "",
+},
 
     // ─── Business Details ──────────────────────────────
-    businessName: {
-      type:     String,
-      required: [true, "Business name is required"],
-      trim:     true,
-    },
+    // businessName: {
+    //   type:     String,
+    //   required: [true, "Business name is required"],
+    //   trim:     true,
+    // },
+businessName: {
+  type:    String,
+  trim:    true,
+  default: "",
+},
 
-    ownerName: {
-      type:     String,
-      required: [true, "Owner name is required"],
-      trim:     true,
-    },
-
+    // ownerName: {
+    //   type:     String,
+    //   required: [true, "Owner name is required"],
+    //   trim:     true,
+    // },
+  ownerName: {
+  type:    String,
+  trim:    true,
+  default: "",
+},
     contactPersonName: {
       type:  String,
       trim:  true,

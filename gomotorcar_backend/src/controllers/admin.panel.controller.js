@@ -2115,6 +2115,1269 @@ const getAuditLogs = asyncHandler(async (req, res) => {
   );
 });
 
+// ═══════════════════════════════════════════════════════════
+// BOOKING MANAGEMENT
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/bookings
+// @desc    Get all bookings with filters
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getAdminBookings = asyncHandler(async (req, res) => {
+  const Booking = require("../models/booking.model");
+  const {
+    status, search,
+    from, to,
+    page = 1, limit = 10,
+  } = req.query;
+
+  const filter = { isDeleted: false };
+  if (status) filter.status = status;
+  if (from || to) {
+    filter.createdAt = {};
+    if (from) filter.createdAt.$gte = new Date(from);
+    if (to)   filter.createdAt.$lte = new Date(to);
+  }
+  if (search) {
+    filter.$or = [
+      { bookingNo: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const [bookings, total] = await Promise.all([
+    Booking.find(filter)
+      .populate("customerId",  "name mobileNo")
+      .populate("franchiseId", "name mobileNo")
+      .populate("serviceId",   "name serviceType")
+      .populate("vehicleId",   "registrationNo brand")
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit)),
+    Booking.countDocuments(filter),
+  ]);
+
+  // Status summary
+  const statusSummary = {
+    pending:   0,
+    confirmed: 0,
+    started:   0,
+    completed: 0,
+    cancelled: 0,
+  };
+  bookings.forEach((b) => {
+    if (statusSummary[b.status] !== undefined) {
+      statusSummary[b.status]++;
+    }
+  });
+
+  return successResponse(
+    res,
+    "Bookings fetched successfully",
+    {
+      total,
+      page:          parseInt(page),
+      totalPages:    Math.ceil(total / parseInt(limit)),
+      statusSummary,
+      bookings,
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/bookings/:id
+// @desc    Get booking full details with all tabs
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getAdminBookingDetails = asyncHandler(async (req, res) => {
+  const Booking = require("../models/booking.model");
+
+  const booking = await Booking.findOne({
+    _id:       req.params.id,
+    isDeleted: false,
+  })
+    .populate("customerId",        "name mobileNo email")
+    .populate("franchiseId",       "name mobileNo")
+    .populate("serviceId",         "name description pricing")
+    .populate("vehicleId",         "registrationNo brand model category")
+    .populate("customerAddressId", "line1 city pinCode");
+
+  if (!booking) {
+    return errorResponse(res, "Booking not found", 404);
+  }
+
+  // Build timeline
+  const timeline = [];
+
+  if (booking.createdAt) {
+    timeline.push({
+      stage:     "created",
+      label:     "Booking Created",
+      timestamp: booking.createdAt,
+    });
+  }
+  if (booking.assignedAt) {
+    timeline.push({
+      stage:     "assigned",
+      label:     "Technician Assigned",
+      timestamp: booking.assignedAt,
+    });
+  }
+  if (booking.inTransitAt) {
+    timeline.push({
+      stage:     "in_transit",
+      label:     "In Transit",
+      timestamp: booking.inTransitAt,
+    });
+  }
+  if (booking.startedAt) {
+    timeline.push({
+      stage:     "started",
+      label:     "Service Started",
+      timestamp: booking.startedAt,
+    });
+  }
+  if (booking.completedAt) {
+    timeline.push({
+      stage:     "completed",
+      label:     "Service Completed",
+      timestamp: booking.completedAt,
+    });
+  }
+  if (booking.cancelledAt) {
+    timeline.push({
+      stage:     "cancelled",
+      label:     "Booking Cancelled",
+      timestamp: booking.cancelledAt,
+    });
+  }
+
+  return successResponse(
+    res,
+    "Booking details fetched successfully",
+    {
+      booking,
+      timeline,
+      tabs: {
+        customer: {
+          name:     booking.customerId?.name,
+          mobile:   booking.customerId?.mobileNo,
+          email:    booking.customerId?.email,
+        },
+        vehicle: {
+          registrationNo: booking.vehicleId?.registrationNo,
+          brand:          booking.vehicleId?.brand,
+          model:          booking.vehicleId?.model,
+          category:       booking.vehicleId?.category,
+        },
+        service: {
+          name:        booking.serviceName,
+          mode:        booking.serviceMode,
+          amount:      booking.amount,
+          taxAmount:   booking.taxAmount,
+          totalAmount: booking.totalAmount,
+        },
+        jobCard: {
+          items:            booking.jobCard?.items || [],
+          originalAmount:   booking.jobCard?.originalAmount,
+          revisedAmount:    booking.jobCard?.revisedAmount,
+          customerApproved: booking.jobCard?.customerApproved,
+        },
+        payment: {
+          mode:          booking.paymentMode,
+          status:        booking.paymentStatus,
+          paymentId:     booking.paymentId,
+          totalAmount:   booking.totalAmount,
+          invoiceUrl:    booking.invoiceUrl,
+        },
+        timeline,
+      },
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   PUT /api/admin/panel/bookings/:id/status
+// @desc    Update booking status (admin override)
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const updateBookingStatus = asyncHandler(async (req, res) => {
+  const Booking = require("../models/booking.model");
+  const { status, reason } = req.body || {};
+
+  const validStatuses = [
+    "pending", "confirmed", "assigned",
+    "in_transit", "started", "completed", "cancelled",
+  ];
+
+  if (!validStatuses.includes(status)) {
+    return errorResponse(
+      res,
+      `Invalid status. Valid: ${validStatuses.join(", ")}`,
+      400
+    );
+  }
+
+  const updateFields = { status };
+
+  // Set timestamp based on status
+  if (status === "assigned")   updateFields.assignedAt   = new Date();
+  if (status === "in_transit") updateFields.inTransitAt  = new Date();
+  if (status === "started")    updateFields.startedAt    = new Date();
+  if (status === "completed")  updateFields.completedAt  = new Date();
+  if (status === "cancelled") {
+    updateFields.cancelledAt        = new Date();
+    updateFields.cancellationReason = reason || "Cancelled by admin";
+  }
+
+  const booking = await Booking.findByIdAndUpdate(
+    req.params.id,
+    { $set: updateFields },
+    { new: true }
+  );
+
+  if (!booking) {
+    return errorResponse(res, "Booking not found", 404);
+  }
+
+  return successResponse(
+    res,
+    "Booking status updated successfully",
+    {
+      bookingId: booking._id,
+      bookingNo: booking.bookingNo,
+      status:    booking.status,
+    }
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// SUPERVISOR MANAGEMENT
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/supervisors
+// @desc    Get all supervisors with details
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getSupervisorList = asyncHandler(async (req, res) => {
+  const {
+    status, search,
+    page = 1, limit = 10,
+  } = req.query;
+
+  const filter = { role: "SU", isDeleted: false };
+  if (status) filter.status = status;
+  if (search) {
+    filter.$or = [
+      { name:     { $regex: search, $options: "i" } },
+      { mobileNo: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const [supervisors, total] = await Promise.all([
+    User.find(filter)
+      .select("-sessionToken -password -__v")
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit)),
+    User.countDocuments(filter),
+  ]);
+
+  const Subscription = require("../models/subscription.model");
+
+  // Enrich with counts
+  const enriched = await Promise.all(
+    supervisors.map(async (s) => {
+      const [
+        apartmentCount,
+        cleanerCount,
+        customerCount,
+      ] = await Promise.all([
+        Subscription.distinct("apartmentId", {
+          supervisorId: s._id,
+          status:       "active",
+          isDeleted:    false,
+        }),
+        Subscription.distinct("cleanerId", {
+          supervisorId: s._id,
+          status:       "active",
+          isDeleted:    false,
+        }),
+        Subscription.countDocuments({
+          supervisorId: s._id,
+          status:       "active",
+          isDeleted:    false,
+        }),
+      ]);
+
+      return {
+        ...s.toObject(),
+        apartmentsCount: apartmentCount.length,
+        cleanersCount:   cleanerCount.length,
+        customersCount:  customerCount,
+      };
+    })
+  );
+
+  return successResponse(
+    res,
+    "Supervisors fetched successfully",
+    {
+      total,
+      page:        parseInt(page),
+      totalPages:  Math.ceil(total / parseInt(limit)),
+      supervisors: enriched,
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/supervisors/:id
+// @desc    Get supervisor full profile with all tabs
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getSupervisorDetails = asyncHandler(async (req, res) => {
+  const Subscription = require("../models/subscription.model");
+  const WorkSession  = require("../models/workSession.model");
+  const Inventory    = require("../models/inventory.model");
+  const QRStock      = require("../models/qrStock.model");
+
+  const supervisor = await User.findOne({
+    _id:       req.params.id,
+    role:      "SU",
+    isDeleted: false,
+  }).select("-sessionToken -password");
+
+  if (!supervisor) {
+    return errorResponse(res, "Supervisor not found", 404);
+  }
+
+  const [
+    allocatedApartments,
+    allocatedCleaners,
+    qrStock,
+    inventory,
+    recentApprovals,
+  ] = await Promise.all([
+    Subscription.find({
+      supervisorId: supervisor._id,
+      status:       "active",
+      isDeleted:    false,
+    })
+      .distinct("apartmentId"),
+    Subscription.find({
+      supervisorId: supervisor._id,
+      status:       "active",
+      isDeleted:    false,
+    })
+      .distinct("cleanerId"),
+    QRStock.find({
+      supervisorId: supervisor._id,
+      isDeleted:    false,
+    }),
+    Inventory.find({
+      supervisorId: supervisor._id,
+      isDeleted:    false,
+    }),
+    WorkSession.find({
+      supervisorId: supervisor._id,
+      status:       { $in: ["approved", "rejected_by_supervisor", "redo"] },
+      isDeleted:    false,
+    })
+      .populate("cleanerId", "name")
+      .sort({ updatedAt: -1 })
+      .limit(20),
+  ]);
+
+  // QR stock summary
+  const qrSummary = {
+    total:     qrStock.length,
+    available: qrStock.filter(q => q.status === "available").length,
+    allocated: qrStock.filter(q => q.status === "allocated").length,
+    damaged:   qrStock.filter(q => q.status === "damaged").length,
+  };
+
+  return successResponse(
+    res,
+    "Supervisor details fetched successfully",
+    {
+      supervisor,
+      tabs: {
+        apartmentAllocation: {
+          count:        allocatedApartments.length,
+          apartmentIds: allocatedApartments,
+        },
+        cleanerAllocation: {
+          count:      allocatedCleaners.length,
+          cleanerIds: allocatedCleaners,
+        },
+        qrStock:     qrSummary,
+        inventory:   inventory,
+        workApprovalHistory: recentApprovals,
+      },
+    }
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// NCSP MANAGEMENT
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/ncsp
+// @desc    Get all NCSP partners
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getNCSPList = asyncHandler(async (req, res) => {
+  const NCSPProfile = require("../models/ncspProfile.model");
+  const {
+    status, search,
+    page = 1, limit = 10,
+  } = req.query;
+
+  const filter = { role: "NC", isDeleted: false };
+  if (status) filter.status = status;
+  if (search) {
+    filter.$or = [
+      { name:     { $regex: search, $options: "i" } },
+      { mobileNo: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const [users, total] = await Promise.all([
+    User.find(filter)
+      .select("-sessionToken -password -__v")
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit)),
+    User.countDocuments(filter),
+  ]);
+
+  // Enrich with profile
+  const Lead = require("../models/lead.model");
+  const enriched = await Promise.all(
+    users.map(async (u) => {
+      const [profile, leadCount] = await Promise.all([
+        NCSPProfile.findOne({
+          userId:    u._id,
+          isDeleted: false,
+        }).select("businessName gstNo appStatus services"),
+        Lead.countDocuments({
+          providerId: u._id,
+          isDeleted:  false,
+        }),
+      ]);
+
+      return {
+        ...u.toObject(),
+        businessName:  profile?.businessName || "",
+        gstNo:         profile?.gstNo        || "",
+        appStatus:     profile?.appStatus    || "inactive",
+        servicesCount: profile?.services?.length || 0,
+        totalLeads:    leadCount,
+      };
+    })
+  );
+
+  return successResponse(
+    res,
+    "NCSP list fetched successfully",
+    {
+      total,
+      page:       parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit)),
+      ncspList:   enriched,
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/ncsp/:id
+// @desc    Get NCSP full details with all tabs
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getNCSPDetails = asyncHandler(async (req, res) => {
+  const NCSPProfile = require("../models/ncspProfile.model");
+  const Lead        = require("../models/lead.model");
+  const Payment     = require("../models/payment.model");
+
+  const user = await User.findOne({
+    _id:       req.params.id,
+    role:      "NC",
+    isDeleted: false,
+  }).select("-sessionToken -password");
+
+  if (!user) {
+    return errorResponse(res, "NCSP not found", 404);
+  }
+
+  const [profile, leads, payments] = await Promise.all([
+    NCSPProfile.findOne({
+      userId:    user._id,
+      isDeleted: false,
+    }),
+    Lead.find({
+      providerId: user._id,
+      isDeleted:  false,
+    })
+      .populate("customerId", "name mobileNo")
+      .sort({ createdAt: -1 })
+      .limit(20),
+    Payment.find({
+      customerId: user._id,
+      isDeleted:  false,
+    }).sort({ createdAt: -1 }).limit(10),
+  ]);
+
+  return successResponse(
+    res,
+    "NCSP details fetched successfully",
+    {
+      user,
+      tabs: {
+        businessDetails: profile,
+        gstVerification: {
+          gstNo:      profile?.gstNo,
+          isVerified: profile?.gstNo ? true : false,
+        },
+        services: profile?.services || [],
+        pricing:  profile?.services?.map((s) => ({
+          serviceName: s.serviceName,
+          pricing:     s.pricing,
+        })) || [],
+        leads,
+        payments,
+      },
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   PUT /api/admin/panel/ncsp/:id/app-status
+// @desc    Toggle NCSP app visibility
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+// const updateNCSPAppStatus = asyncHandler(async (req, res) => {
+//   const NCSPProfile = require("../models/ncspProfile.model");
+//   const { appStatus } = req.body || {};
+
+//   const profile = await NCSPProfile.findOneAndUpdate(
+//     { userId: req.params.id, isDeleted: false },
+//     { $set: { appStatus } },
+//     { new: true }
+//   );
+
+//   if (!profile) {
+//     return errorResponse(res, "NCSP profile not found", 404);
+//   }
+
+//   return successResponse(
+//     res,
+//     `NCSP app status updated to ${appStatus}`,
+//     { appStatus: profile.appStatus }
+//   );
+// });
+
+const updateNCSPAppStatus = asyncHandler(async (req, res) => {
+  const NCSPProfile = require("../models/ncspProfile.model");
+  const { appStatus } = req.body || {};
+
+  if (!["active", "inactive", "suspended"].includes(appStatus)) {
+    return errorResponse(
+      res,
+      "appStatus must be active, inactive or suspended",
+      400
+    );
+  }
+
+  // Try to update existing profile
+  let profile = await NCSPProfile.findOneAndUpdate(
+    { userId: req.params.id, isDeleted: false },
+    { $set: { appStatus } },
+    { new: true }
+  );
+
+  // If no profile — create basic one
+  if (!profile) {
+    profile = await NCSPProfile.create({
+      userId:    req.params.id,
+      appStatus,
+      isDeleted: false,
+    });
+  }
+
+  // Also update user status
+  await User.findByIdAndUpdate(req.params.id, {
+    $set: {
+      status: appStatus === "active" ? "active" : "inactive",
+    },
+  });
+
+  return successResponse(
+    res,
+    `NCSP app status updated to ${appStatus}`,
+    {
+      userId:    req.params.id,
+      appStatus: profile.appStatus,
+    }
+  );
+});
+
+
+// ═══════════════════════════════════════════════════════════
+// FRANCHISE MANAGEMENT
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/franchises
+// @desc    Get all franchisees
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getFranchiseList = asyncHandler(async (req, res) => {
+  const FranchiseeProfile = require("../models/franchiseeProfile.model");
+  const {
+    status, franchiseType,
+    search, page = 1, limit = 10,
+  } = req.query;
+
+  const filter = {
+    role:      { $in: ["FR", "FS"] },
+    isDeleted: false,
+  };
+  if (status) filter.status = status;
+  if (search) {
+    filter.$or = [
+      { name:     { $regex: search, $options: "i" } },
+      { mobileNo: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  const [users, total] = await Promise.all([
+    User.find(filter)
+      .select("-sessionToken -password -__v")
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit)),
+    User.countDocuments(filter),
+  ]);
+
+  const Booking = require("../models/booking.model");
+
+  // Enrich with profile
+  const enriched = await Promise.all(
+    users.map(async (u) => {
+      const [profile, bookingCount, revenue] = await Promise.all([
+        FranchiseeProfile.findOne({
+          userId:    u._id,
+          isDeleted: false,
+        }).select(
+          "businessName franchiseType appStatus " +
+          "businessAddress services"
+        ),
+        Booking.countDocuments({
+          franchiseId: u._id,
+          isDeleted:   false,
+        }),
+        Booking.aggregate([
+          {
+            $match: {
+              franchiseId:   u._id,
+              paymentStatus: "success",
+              isDeleted:     false,
+            },
+          },
+          {
+            $group: {
+              _id:   null,
+              total: { $sum: "$totalAmount" },
+            },
+          },
+        ]),
+      ]);
+
+      return {
+        ...u.toObject(),
+        businessName:  profile?.businessName   || "",
+        franchiseType: profile?.franchiseType  || "",
+        appStatus:     profile?.appStatus      || "inactive",
+        location:      profile?.businessAddress || {},
+        bookingCount,
+        totalRevenue:  revenue[0]?.total || 0,
+      };
+    })
+  );
+
+  return successResponse(
+    res,
+    "Franchise list fetched successfully",
+    {
+      total,
+      page:          parseInt(page),
+      totalPages:    Math.ceil(total / parseInt(limit)),
+      franchiseList: enriched,
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/franchises/:id
+// @desc    Get franchise full details with all tabs
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getFranchiseDetails = asyncHandler(async (req, res) => {
+  const FranchiseeProfile = require("../models/franchiseeProfile.model");
+  const Booking           = require("../models/booking.model");
+  const Wallet            = require("../models/wallet.model");
+
+  const user = await User.findOne({
+    _id:       req.params.id,
+    role:      { $in: ["FR", "FS"] },
+    isDeleted: false,
+  }).select("-sessionToken -password");
+
+  if (!user) {
+    return errorResponse(res, "Franchise not found", 404);
+  }
+
+  const [profile, bookings, wallet] = await Promise.all([
+    FranchiseeProfile.findOne({
+      userId:    user._id,
+      isDeleted: false,
+    }),
+    Booking.find({
+      franchiseId: user._id,
+      isDeleted:   false,
+    })
+      .populate("customerId", "name mobileNo")
+      .populate("serviceId",  "name")
+      .sort({ createdAt: -1 })
+      .limit(20),
+    Wallet.findOne({ userId: user._id }),
+  ]);
+
+  // Revenue summary
+  const revenue = bookings
+    .filter((b) => b.paymentStatus === "success")
+    .reduce((sum, b) => sum + (b.totalAmount || 0), 0);
+
+  return successResponse(
+    res,
+    "Franchise details fetched successfully",
+    {
+      user,
+      tabs: {
+        profile,
+        bookings: {
+          total:   bookings.length,
+          revenue,
+          list:    bookings,
+        },
+        jobCards: bookings
+          .filter((b) => b.jobCard?.items?.length > 0)
+          .map((b) => ({
+            bookingNo: b.bookingNo,
+            jobCard:   b.jobCard,
+          })),
+        wallet: {
+          balance: wallet?.balance || 0,
+          ledger:  wallet?.ledger  || [],
+        },
+        ratings: bookings
+          .filter((b) => b.rating?.stars)
+          .map((b) => ({
+            bookingNo: b.bookingNo,
+            rating:    b.rating,
+          })),
+        payments: bookings.map((b) => ({
+          bookingNo:     b.bookingNo,
+          amount:        b.totalAmount,
+          paymentStatus: b.paymentStatus,
+          paymentMode:   b.paymentMode,
+          date:          b.createdAt,
+        })),
+      },
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   PUT /api/admin/panel/franchises/:id/app-status
+// @desc    Toggle franchise app visibility
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+// const updateFranchiseAppStatus = asyncHandler(async (req, res) => {
+//   const FranchiseeProfile = require("../models/franchiseeProfile.model");
+//   const { appStatus } = req.body || {};
+
+//   const profile = await FranchiseeProfile.findOneAndUpdate(
+//     { userId: req.params.id, isDeleted: false },
+//     { $set: { appStatus } },
+//     { new: true }
+//   );
+
+//   if (!profile) {
+//     return errorResponse(res, "Franchise profile not found", 404);
+//   }
+
+//   return successResponse(
+//     res,
+//     `Franchise app status updated to ${appStatus}`,
+//     { appStatus: profile.appStatus }
+//   );
+// });
+
+const updateFranchiseAppStatus = asyncHandler(async (req, res) => {
+  const FranchiseeProfile = require("../models/franchiseeProfile.model");
+  const { appStatus } = req.body || {};
+
+  if (!["active", "inactive", "suspended"].includes(appStatus)) {
+    return errorResponse(
+      res,
+      "appStatus must be active, inactive or suspended",
+      400
+    );
+  }
+
+  // Try to update existing profile
+  let profile = await FranchiseeProfile.findOneAndUpdate(
+    { userId: req.params.id, isDeleted: false },
+    { $set: { appStatus } },
+    { new: true }
+  );
+
+  // If no profile — create basic one
+  if (!profile) {
+    profile = await FranchiseeProfile.create({
+      userId:    req.params.id,
+      appStatus,
+      isDeleted: false,
+    });
+  }
+
+  // Also update user status
+  await User.findByIdAndUpdate(req.params.id, {
+    $set: {
+      status: appStatus === "active" ? "active" : "inactive",
+    },
+  });
+
+  return successResponse(
+    res,
+    `Franchise app status updated to ${appStatus}`,
+    {
+      userId:    req.params.id,
+      appStatus: profile.appStatus,
+    }
+  );
+});
+
+
+// ═══════════════════════════════════════════════════════════
+// OPERATIONS TEAM MANAGEMENT
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/operations
+// @desc    Get all operations team members
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getOperationsList = asyncHandler(async (req, res) => {
+  const {
+    status, page = 1, limit = 10,
+  } = req.query;
+
+  const filter = { role: "OT", isDeleted: false };
+  if (status) filter.status = status;
+
+  const [members, total] = await Promise.all([
+    User.find(filter)
+      .select("-sessionToken -password -__v")
+      .sort({ createdAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit)),
+    User.countDocuments(filter),
+  ]);
+
+  return successResponse(
+    res,
+    "Operations team fetched successfully",
+    {
+      total,
+      page:       parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit)),
+      members,
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   POST /api/admin/panel/operations/create
+// @desc    Create operations team member
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const createOperationsMember = asyncHandler(async (req, res) => {
+  const bcrypt = require("bcryptjs");
+  const {
+    mobileNo, name, email, password,
+  } = req.body || {};
+
+  if (!mobileNo || !name || !password) {
+    return errorResponse(
+      res,
+      "Mobile, name and password are required",
+      400
+    );
+  }
+
+  const existing = await User.findOne({
+    mobileNo,
+    isDeleted: false,
+  });
+
+  if (existing) {
+    return errorResponse(
+      res,
+      "Mobile number already registered",
+      409
+    );
+  }
+
+  // Generate partner ID
+  const count    = await User.countDocuments({ role: "OT" });
+  const partnerId = `OT-${String(count + 1).padStart(5, "0")}`;
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+
+  const member = await User.create({
+    mobileNo,
+    name,
+    email,
+    role:        "OT",
+    partnerId,
+    password:    hashedPassword,
+    status:      "active",
+    createdBy:   req.user._id,
+    approvedBy:  req.user._id,
+    approvedAt:  new Date(),
+    activatedAt: new Date(),
+  });
+
+  return createdResponse(
+    res,
+    "Operations team member created successfully",
+    {
+      member: {
+        _id:       member._id,
+        name:      member.name,
+        mobileNo:  member.mobileNo,
+        partnerId: member.partnerId,
+        role:      member.role,
+        status:    member.status,
+      },
+    }
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// SERVICE MANAGEMENT
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/services
+// @desc    Get all services in catalog
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getAdminServices = asyncHandler(async (req, res) => {
+  const Service = require("../models/service.model");
+  const {
+    serviceType, isActive,
+  } = req.query;
+
+  const filter = { isDeleted: false };
+  if (serviceType)         filter.serviceType = serviceType;
+  if (isActive !== undefined) {
+    filter.isActive = isActive === "true";
+  }
+
+  const services = await Service.find(filter)
+    .sort({ sortOrder: 1 });
+
+  return successResponse(
+    res,
+    "Services fetched successfully",
+    {
+      count: services.length,
+      services,
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   PUT /api/admin/panel/services/:id
+// @desc    Update service details
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const updateAdminService = asyncHandler(async (req, res) => {
+  const Service = require("../models/service.model");
+
+  const service = await Service.findByIdAndUpdate(
+    req.params.id,
+    { $set: req.body || {} },
+    { new: true, runValidators: true }
+  );
+
+  if (!service) {
+    return errorResponse(res, "Service not found", 404);
+  }
+
+  return successResponse(
+    res,
+    "Service updated successfully",
+    { service }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   PUT /api/admin/panel/services/:id/toggle
+// @desc    Activate or deactivate service
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const toggleService = asyncHandler(async (req, res) => {
+  const Service = require("../models/service.model");
+
+  const service = await Service.findById(req.params.id);
+
+  if (!service) {
+    return errorResponse(res, "Service not found", 404);
+  }
+
+  service.isActive = !service.isActive;
+  await service.save();
+
+  return successResponse(
+    res,
+    `Service ${service.isActive ? "activated" : "deactivated"} successfully`,
+    {
+      serviceId: service._id,
+      name:      service.name,
+      isActive:  service.isActive,
+    }
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS MODULE
+// ═══════════════════════════════════════════════════════════
+
+// In-memory settings store
+// Will be replaced with DB in Phase 14
+let appSettings = {
+  general: {
+    appName:        "GoMotorCar",
+    supportEmail:   "support@gomotorcar.com",
+    supportPhone:   "9742977577",
+    helplineNo:     "9742977577",
+  },
+  commission: {
+    bookingCommissionPercent: 10,
+    ncspLeadCostMonthly:      999,
+    ncspLeadCostAnnual:       9999,
+  },
+  gst: {
+    gstPercent:  18,
+    gstNo:       "",
+    companyName: "GoMotorCar Pvt Ltd",
+  },
+  payment: {
+    razorpayKeyId:  "",
+    razorpaySecret: "",
+    walletEnabled:  true,
+    minWalletTopup: 100,
+    maxWalletLimit: 50000,
+  },
+  notifications: {
+    smsEnabled:   true,
+    emailEnabled: true,
+    pushEnabled:  true,
+  },
+};
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/settings
+// @desc    Get all settings
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getSettings = asyncHandler(async (req, res) => {
+  // Hide sensitive keys in response
+  const safeSettings = {
+    ...appSettings,
+    payment: {
+      ...appSettings.payment,
+      razorpaySecret: appSettings.payment.razorpaySecret
+        ? "***configured***"
+        : "not configured",
+    },
+  };
+
+  return successResponse(
+    res,
+    "Settings fetched successfully",
+    { settings: safeSettings }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   PUT /api/admin/panel/settings
+// @desc    Update settings
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const updateSettings = asyncHandler(async (req, res) => {
+  const { section, data } = req.body || {};
+
+  const validSections = [
+    "general", "commission", "gst",
+    "payment", "notifications",
+  ];
+
+  if (!validSections.includes(section)) {
+    return errorResponse(
+      res,
+      `Invalid section. Valid: ${validSections.join(", ")}`,
+      400
+    );
+  }
+
+  // Merge settings
+  appSettings[section] = {
+    ...appSettings[section],
+    ...data,
+  };
+
+  return successResponse(
+    res,
+    `${section} settings updated successfully`,
+    { settings: appSettings[section] }
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// ADMIN USER MANAGEMENT
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/admin-users
+// @desc    Get all admin users
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getAdminUsers = asyncHandler(async (req, res) => {
+  const adminUsers = await User.find({
+    role:      { $in: ["IT", "SU", "OT"] },
+    isDeleted: false,
+  })
+    .select("-sessionToken -password -__v")
+    .sort({ createdAt: -1 });
+
+  // Group by role
+  const grouped = {
+    superAdmin:        adminUsers.filter(u => u.role === "IT"),
+    supervisors:       adminUsers.filter(u => u.role === "SU"),
+    operationsTeam:    adminUsers.filter(u => u.role === "OT"),
+  };
+
+  return successResponse(
+    res,
+    "Admin users fetched successfully",
+    {
+      total:   adminUsers.length,
+      grouped,
+      users:   adminUsers,
+    }
+  );
+});
+
+// ─────────────────────────────────────────────────────────
+// @route   PUT /api/admin/panel/admin-users/:id/status
+// @desc    Activate or deactivate admin user
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const updateAdminUserStatus = asyncHandler(async (req, res) => {
+  const { status } = req.body || {};
+
+  if (!["active", "inactive"].includes(status)) {
+    return errorResponse(
+      res,
+      "Status must be active or inactive",
+      400
+    );
+  }
+
+  const user = await User.findByIdAndUpdate(
+    req.params.id,
+    { $set: { status } },
+    { new: true }
+  ).select("-sessionToken -password");
+
+  if (!user) {
+    return errorResponse(res, "User not found", 404);
+  }
+
+  return successResponse(
+    res,
+    `Admin user ${status === "active" ? "activated" : "deactivated"} successfully`,
+    { user }
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
+// INVENTORY MANAGEMENT (ADMIN VIEW)
+// ═══════════════════════════════════════════════════════════
+
+// ─────────────────────────────────────────────────────────
+// @route   GET /api/admin/panel/inventory
+// @desc    Get all inventory records
+// @access  Private (IT Admin)
+// ─────────────────────────────────────────────────────────
+const getAdminInventory = asyncHandler(async (req, res) => {
+  const Inventory = require("../models/inventory.model");
+  const {
+    status, page = 1, limit = 10,
+  } = req.query;
+
+  const filter = { isDeleted: false };
+  if (status) filter.status = status;
+
+  const [inventory, total] = await Promise.all([
+    Inventory.find(filter)
+      .populate("cleanerId",    "name mobileNo partnerId")
+      .populate("supervisorId", "name mobileNo partnerId")
+      .sort({ allocatedAt: -1 })
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .limit(parseInt(limit)),
+    Inventory.countDocuments(filter),
+  ]);
+
+  // Summary
+  const summary = {
+    total:    await Inventory.countDocuments({ isDeleted: false }),
+    pending:  await Inventory.countDocuments({ status: "pending",  isDeleted: false }),
+    accepted: await Inventory.countDocuments({ status: "accepted", isDeleted: false }),
+    rejected: await Inventory.countDocuments({ status: "rejected", isDeleted: false }),
+  };
+
+  return successResponse(
+    res,
+    "Inventory fetched successfully",
+    {
+      summary,
+      total,
+      page:       parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit)),
+      inventory,
+    }
+  );
+});
+
 
 
 module.exports = {
@@ -2196,5 +3459,36 @@ module.exports = {
   getWalletTransactions,
   // Audit Logs
   getAuditLogs,
+
+   // Booking Management
+  getAdminBookings,
+  getAdminBookingDetails,
+  updateBookingStatus,
+  // Supervisor Management
+  getSupervisorList,
+  getSupervisorDetails,
+  // NCSP Management
+  getNCSPList,
+  getNCSPDetails,
+  updateNCSPAppStatus,
+  // Franchise Management
+  getFranchiseList,
+  getFranchiseDetails,
+  updateFranchiseAppStatus,
+  // Operations Team
+  getOperationsList,
+  createOperationsMember,
+  // Service Management
+  getAdminServices,
+  updateAdminService,
+  toggleService,
+  // Settings
+  getSettings,
+  updateSettings,
+  // Admin Users
+  getAdminUsers,
+  updateAdminUserStatus,
+  // Inventory
+  getAdminInventory,
 
 };

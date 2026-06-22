@@ -40,17 +40,29 @@ const ncspProfileSchema = new mongoose.Schema(
     },
 
     // ─── Business Details ──────────────────────────────
+    // businessName: {
+    //   type:     String,
+    //   required: [true, "Business name is required"],
+    //   trim:     true,
+    // },
+
     businessName: {
-      type:     String,
-      required: [true, "Business name is required"],
-      trim:     true,
-    },
+  type:    String,
+  trim:    true,
+  default: "",
+},
+
+    // ownerName: {
+    //   type:     String,
+    //   required: [true, "Owner name is required"],
+    //   trim:     true,
+    // },
 
     ownerName: {
-      type:     String,
-      required: [true, "Owner name is required"],
-      trim:     true,
-    },
+  type:    String,
+  trim:    true,
+  default: "",
+},
 
     contactPersonName: {
       type:  String,
@@ -77,6 +89,47 @@ const ncspProfileSchema = new mongoose.Schema(
     gstCertificatePic: {
       type: String, // S3 URL
     },
+    // ─── Annual Fee ───────────────────────────────────────────
+annualFeeStatus: {
+  type:    String,
+  enum:    ["unpaid", "paid", "expired"],
+  default: "unpaid",
+}
+,annualFeePaidAt: {
+  type: Date,
+},
+
+annualFeeAmount: {
+  type:    Number,
+  default: 0,
+},
+
+listingValidTill: {
+  type: Date,
+},
+// ─── Service Suggestions ─────────────────────────────────
+serviceSuggestions: [{
+  serviceName:  { type: String },
+  description:  { type: String },
+  suggestedAt:  { type: Date },
+  status: {
+    type:    String,
+    enum:    ["pending", "approved", "rejected"],
+    default: "pending",
+  },
+}],
+
+// ─── Promotional Offers ───────────────────────────────────
+promotionalOffers: [{
+  title:       { type: String },
+  description: { type: String },
+  banner:      { type: String },
+  validFrom:   { type: Date },
+  validTo:     { type: Date },
+  discount:    { type: String },
+  isActive:    { type: Boolean, default: true },
+  createdAt:   { type: Date, default: Date.now },
+}],
 
     // ─── Business Address ──────────────────────────────
     businessAddress: {

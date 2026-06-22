@@ -51,6 +51,29 @@ const {
   getAllPayments,
   getWalletTransactions,
   getAuditLogs,
+
+   // New imports
+  getAdminBookings,
+  getAdminBookingDetails,
+  updateBookingStatus,
+  getSupervisorList,
+  getSupervisorDetails,
+  getNCSPList,
+  getNCSPDetails,
+  updateNCSPAppStatus,
+  getFranchiseList,
+  getFranchiseDetails,
+  updateFranchiseAppStatus,
+  getOperationsList,
+  createOperationsMember,
+  getAdminServices,
+  updateAdminService,
+  toggleService,
+  getSettings,
+  updateSettings,
+  getAdminUsers,
+  updateAdminUserStatus,
+  getAdminInventory,
 } = require("../controllers/admin.panel.controller");
 const {
   authenticate,
@@ -151,5 +174,46 @@ router.get ("/payments/wallet",       ...adminOnly, getWalletTransactions);
 
 // ─── Audit Logs ───────────────────────────────────────────
 router.get ("/audit-logs", ...adminOnly, getAuditLogs);
+
+// ─── Booking Management ───────────────────────────────────
+router.get("/bookings",              ...adminOnly, getAdminBookings);
+router.get("/bookings/:id",          ...adminOnly, getAdminBookingDetails);
+router.put("/bookings/:id/status",   ...adminOnly, updateBookingStatus);
+
+// ─── Supervisor Management ────────────────────────────────
+router.get("/supervisors",           ...adminOnly, getSupervisorList);
+router.get("/supervisors/:id",       ...adminOnly, getSupervisorDetails);
+
+// ─── NCSP Management ──────────────────────────────────────
+router.get("/ncsp",                  ...adminOnly, getNCSPList);
+router.get("/ncsp/:id",              ...adminOnly, getNCSPDetails);
+router.put("/ncsp/:id/app-status",   ...adminOnly, updateNCSPAppStatus);
+
+// ─── Franchise Management ─────────────────────────────────
+router.get("/franchises",                    ...adminOnly, getFranchiseList);
+router.get("/franchises/:id",                ...adminOnly, getFranchiseDetails);
+router.put("/franchises/:id/app-status",     ...adminOnly, updateFranchiseAppStatus);
+
+// ─── Operations Team ──────────────────────────────────────
+router.get ("/operations",        ...adminOnly, getOperationsList);
+router.post("/operations/create", ...adminOnly, createOperationsMember);
+
+// ─── Service Management ───────────────────────────────────
+router.get("/services",              ...adminOnly, getAdminServices);
+router.put("/services/:id",          ...adminOnly, updateAdminService);
+router.put("/services/:id/toggle",   ...adminOnly, toggleService);
+
+// ─── Settings ─────────────────────────────────────────────
+router.get("/settings",  ...adminOnly, getSettings);
+router.put("/settings",  ...adminOnly, updateSettings);
+
+// ─── Admin Users ──────────────────────────────────────────
+router.get("/admin-users",               ...adminOnly, getAdminUsers);
+router.put("/admin-users/:id/status",    ...adminOnly, updateAdminUserStatus);
+
+// ─── Inventory ────────────────────────────────────────────
+router.get("/inventory",  ...adminOnly, getAdminInventory);
+
+
 
 module.exports = router;
