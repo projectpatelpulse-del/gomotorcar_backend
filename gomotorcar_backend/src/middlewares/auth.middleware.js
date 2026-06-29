@@ -51,20 +51,35 @@ const authenticate = asyncHandler(async (req, res, next) => {
 // Usage: requireRole("CL", "SU")
 // Checks if logged in user has one of the allowed roles
 // ─────────────────────────────────────────────────────────
-const requireRole = (...roles) => {
+// const requireRole = (...roles) => {
+//   return (req, res, next) => {
+//     if (!req.user) {
+//       return errorResponse(res, "Unauthenticated", 401);
+//     }
+
+//     if (!roles.includes(req.user.role)) {
+//       return errorResponse(
+//         res,
+//         `Access denied. Required role: ${roles.join(" or ")}`,
+//         403
+//       );
+//     }
+
+//     next();
+//   };
+// };
+
+const requireRole = (role) => {
   return (req, res, next) => {
-    if (!req.user) {
-      return errorResponse(res, "Unauthenticated", 401);
-    }
+    // Support both single role and array of roles
+    const allowedRoles = Array.isArray(role) ? role : [role];
 
-    if (!roles.includes(req.user.role)) {
-      return errorResponse(
-        res,
-        `Access denied. Required role: ${roles.join(" or ")}`,
-        403
-      );
+    if (!allowedRoles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: `Access denied. Required role: ${allowedRoles.join(" or ")}`,
+      });
     }
-
     next();
   };
 };

@@ -140,6 +140,8 @@ businessName: {
       closeTime: { type: String }, // "20:00"
     },
 
+
+
     workingDays: [{
       type: String,
       enum: ["mon","tue","wed","thu","fri","sat","sun"],
@@ -203,6 +205,15 @@ businessName: {
       type:    Boolean,
       default: false,
     },
+
+    // ─── Internal Ratings (Ops/Admin only) ───────────────────
+    internalRatings: [{
+      rating:   { type: Number, min: 1, max: 5 },
+      remarks:  { type: String },
+      ratedBy:  { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      ratedAt:  { type: Date, default: Date.now },
+      raterRole:{ type: String },
+    }],
   },
   {
     timestamps: true,

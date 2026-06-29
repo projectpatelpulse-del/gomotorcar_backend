@@ -188,11 +188,33 @@ const bookingSchema = new mongoose.Schema(
       ratedAt: { type: Date },
     },
 
+
+    // ─── Expedite ─────────────────────────────────────────────
+isExpedited: {
+  type:    Boolean,
+  default: false,
+},
+
+expeditedAt: {
+  type: Date,
+},
+
+expeditedBy: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref:  "User",
+},
+
+expediteReason: {
+  type: String,
+},
+
     // ─── Invoice ─────────────────────────────────────────
     invoiceUrl: {
       type: String,
       // S3 URL of generated invoice PDF
     },
+
+    
 
     isDeleted: {
       type:    Boolean,
