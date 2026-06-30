@@ -49,6 +49,8 @@ app.use("/api/supervisor", require("./src/routes/supervisor.routes"));
 app.use("/api/ncsp", require("./src/routes/ncsp.routes"));
 app.use("/api/franchise", require("./src/routes/franchise.routes")); 
 app.use("/api/ops", require("./src/routes/ops.routes")); 
+app.use("/api/notifications", require("./src/routes/notification.routes")); 
+app.use("/api/grievances",    require("./src/routes/grievance.routes"));     
 
 app.use(notFoundHandler);
 app.use(errorHandler);
