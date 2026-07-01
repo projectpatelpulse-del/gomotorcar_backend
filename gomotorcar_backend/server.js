@@ -4,15 +4,75 @@ const helmet       = require("helmet");
 const morgan       = require("morgan");
 const cookieParser = require("cookie-parser");
 
+const requestLogger = require("./src/middlewares/requestLogger.middleware");
 const { errorHandler, notFoundHandler } = require("./src/middlewares/errorHandler");
+
+const logger = require("./src/utils/logger");
+
+const {
+  helmetMiddleware,
+  generalLimiter,
+  otpLimiter,
+  loginLimiter,
+  paymentLimiter,
+  mongoSanitizeMiddleware,
+  hppMiddleware,
+  compressionMiddleware,
+} = require("./src/middlewares/security.middleware");
 
 const app = express();
 
+
 app.use(helmet());
-app.use(cors({ origin: "*", credentials: true }));
+
+// ─────────────────────────────────────────────────────────
+// CORS — Restrict to known origins in production
+// Allows everything in development for convenience
+// ─────────────────────────────────────────────────────────
+const allowedOrigins = process.env.NODE_ENV === "production"
+  ? [
+      "https://gomotorcar.com",
+      "https://www.gomotorcar.com",
+      "https://admin.gomotorcar.com",
+    ]
+  : ["*"];
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (
+      process.env.NODE_ENV !== "production" ||
+      !origin ||
+      allowedOrigins.includes(origin)
+    ) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(cors(corsOptions));
+// respond to preflight requests — avoid registering a wildcard route
+// (some router/path-to-regexp versions throw on '*' route patterns)
+app.use((req, res, next) => {
+  if (req.method === "OPTIONS") {
+    return cors(corsOptions)(req, res, next);
+  }
+  next();
+});
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+
+// ─── Security Middlewares (apply early) ──────────────────
+app.use(helmetMiddleware);
+app.use(compressionMiddleware);
+app.use(mongoSanitizeMiddleware);
+app.use(hppMiddleware);
+app.use(requestLogger);
 
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
@@ -24,7 +84,29 @@ app.get("/", (req, res) => {
     message: "GoMotorCar API is running 🚗",
     version: "1.0.0",
   });
-});
+  });
+
+
+// ─── General rate limit on all API routes ────────────────
+app.use("/api", generalLimiter);
+
+// ─── Health check (before rate limiting ideally, but fine here) ──
+app.use("/api/health", require("./src/routes/health.routes"));
+
+// ─── Stricter rate limits on sensitive routes ────────────
+app.use("/api/auth/otp", otpLimiter);
+app.use("/api/auth/login", loginLimiter);
+app.use("/api/auth/internal/login", loginLimiter);
+app.use("/api/payment", paymentLimiter);
+app.use("/api/fasttag/recharge", paymentLimiter);
+
+
+// / ─── ... your existing routes stay here ... ──────────────
+// app.use("/api/auth", ...);
+// app.use("/api/profile", ...);
+// etc — DO NOT remove these, just add above this point
+
+// NOTE: 404 and global error handler are registered AFTER all routes below
 
 // ─── Routes ───────────────────────────────────────────────
 app.use("/api/auth",     require("./src/routes/auth.routes"));
@@ -52,6 +134,15 @@ app.use("/api/ops", require("./src/routes/ops.routes"));
 app.use("/api/notifications", require("./src/routes/notification.routes")); 
 app.use("/api/grievances",    require("./src/routes/grievance.routes"));     
 
+
+// ─── 404 & error handlers — AFTER all routes ─────────────────
+// ─── Swagger UI — auto-generated from registered routes
+try {
+  const mountSwagger = require("./src/docs/swagger");
+  mountSwagger(app);
+} catch (e) {
+  logger.warn("Swagger docs not mounted: " + (e.message || e));
+}
 app.use(notFoundHandler);
 app.use(errorHandler);
 
