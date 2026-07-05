@@ -29,37 +29,36 @@ app.use(helmet());
 // CORS — Restrict to known origins in production
 // Allows everything in development for convenience
 // ─────────────────────────────────────────────────────────
-const allowedOrigins = process.env.NODE_ENV === "production"
-  ? [
-      "https://gomotorcar.com",
-      "https://www.gomotorcar.com",
-      "https://admin.gomotorcar.com",
-    ]
-  : ["*"];
-
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (
-      process.env.NODE_ENV !== "production" ||
-      !origin ||
-      allowedOrigins.includes(origin)
-    ) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
+const corsOptions = process.env.NODE_ENV === "production"
+  ? {
+      origin: (origin, callback) => {
+        const allowedOrigins = [
+          "https://gomotorcar.com",
+          "https://www.gomotorcar.com",
+          "https://admin.gomotorcar.com",
+        ];
+        if (!origin || allowedOrigins.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      allowedHeaders: ["Content-Type", "Authorization"],
     }
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
+  : {
+      origin: "*",
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+      allowedHeaders: ["Content-Type", "Authorization"],
+    };
 
 app.use(cors(corsOptions));
 // respond to preflight requests — avoid registering a wildcard route
 // (some router/path-to-regexp versions throw on '*' route patterns)
 app.use((req, res, next) => {
   if (req.method === "OPTIONS") {
-    return cors(corsOptions)(req, res, next);
+    return res.sendStatus(200);
   }
   next();
 });

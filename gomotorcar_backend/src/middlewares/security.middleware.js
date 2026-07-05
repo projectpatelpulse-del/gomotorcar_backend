@@ -1,6 +1,5 @@
 const helmet            = require("helmet");
 const rateLimit          = require("express-rate-limit");
-const mongoSanitize      = require("express-mongo-sanitize");
 const hpp                = require("hpp");
 const compression        = require("compression");
 
@@ -74,20 +73,40 @@ const paymentLimiter = rateLimit({
 // ─────────────────────────────────────────────────────────
 // 6. MONGO SANITIZE — Prevent NoSQL injection
 // Strips $ and . from request data
-// Some versions of Node/Express expose `req.query` as a getter-only
-// property; attempting to mutate it causes errors. Wrap the sanitizer
-// and skip full-request sanitization for safe GET-like methods.
+// Wrapped to handle Express 5.x read-only req.query property
 // ─────────────────────────────────────────────────────────
-const _rawMongoSanitize = mongoSanitize({
-  replaceWith: "_",
-});
-
 const mongoSanitizeMiddleware = (req, res, next) => {
-  // Avoid mutating `req.query` for safe read-only requests
-  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
-    return next();
+  try {
+    // Only sanitize body and params, skip query (read-only in Express 5.x)
+    if (req.body) {
+      Object.keys(req.body).forEach(key => {
+        req.body[key] = sanitizeValue(req.body[key]);
+      });
+    }
+    if (req.params) {
+      Object.keys(req.params).forEach(key => {
+        req.params[key] = sanitizeValue(req.params[key]);
+      });
+    }
+  } catch (error) {
+    console.warn('[SECURITY] Sanitization error:', error.message);
   }
-  return _rawMongoSanitize(req, res, next);
+  next();
+};
+
+// Helper function to recursively sanitize values
+const sanitizeValue = (value) => {
+  if (typeof value === 'string') {
+    return value.replace(/[$.]/g, '_');
+  } else if (typeof value === 'object' && value !== null) {
+    const sanitized = Array.isArray(value) ? [] : {};
+    Object.keys(value).forEach(key => {
+      const newKey = key.replace(/[$.]/g, '_');
+      sanitized[newKey] = sanitizeValue(value[key]);
+    });
+    return sanitized;
+  }
+  return value;
 };
 
 // ─────────────────────────────────────────────────────────
